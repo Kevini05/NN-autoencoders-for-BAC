@@ -1,0 +1,37 @@
+# LearningRate = 0.001
+# Decay1 = LearningRate / 100
+# Decay2 = LearningRate / 1000
+# optimizer =  Adam(lr=LearningRate)
+# optimizer_enc = Adam(lr=LearningRate,decay=Decay1)
+# optimizer_dec = Adam(lr=LearningRate,decay=Decay2)
+optimizer = keras.optimizers.Nadam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=None, schedule_decay=0.001)
+optimizer = 'adam'
+# optimizer = keras.optimizers.SGD(lr=0.03, nesterov=True)
+# optimizer = keras.optimizers.Adagrad(learning_rate=0.01)
+
+
+
+\Python3\python.exe ber_bler_calculator.py 16 8 1 saved
+
+\Python3\python.exe ber_bler_calculator.py 16 8 BLER saved
+
+
+\Python3\python.exe autoencoder.py BAC 8 4 100 BER 10000
+
+\Python3\python.exe autoencoder_array.py BAC 8 4 100 BER 10000
+
+\Python3\python.exe autoencoder_array_one-hot.py BAC 8 4 100 BER 10000
+
+\Python3\python.exe autoencoder_generator.py BAC array array it 8 4 100 100
+
+\Python3\python.exe autoencoder_array-array_alt-training.py BAC 16 8 2 BER 100000
+
+\Python3\python.exe autoencoder_array-array_alt-training_loop.py BAC 16 8 10 BER 10000
+
+\Python3\python.exe autoencoder_array-array_polar_alt-training.py BAC 16 4 10 BER 10000
+
+\Python3\python.exe test.py
+\Python3\python.exe test_NN_ber_calculator.py
+
+\Python3\python.exe import_data_cnes.py
+
