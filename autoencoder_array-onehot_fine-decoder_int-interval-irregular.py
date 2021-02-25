@@ -5,20 +5,16 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # or any {'0', '1', '2'}
 
 import keras
 from keras.layers.core import Dense, Lambda
-from keras.layers import LeakyReLU
 from keras.callbacks import LearningRateScheduler
 from keras.layers.normalization import BatchNormalization
-import keras.backend as K
 import tensorflow as tf
-from keras.regularizers import l1, l2
-from mish import Mish as mish
 
-import  ber_bler_calculator as test
 import utils
 import utils_ML
 
 import numpy as np
 import matplotlib.pyplot as plt
+from mish import Mish as mish
 
 ####################################################################################################
 ########### Neural Network Generator ###################
@@ -46,8 +42,8 @@ def decoder_generator(N,k):
   model_dec = keras.Model(inputs=inputs_decoder, outputs=outputs_decoder, name = 'decoder_model')
   return  model_dec
 
-### Meta model Layers definitions
-def meta_model_generator(k,channel,model_enc,model_dec,round,epsilon_t):
+### Meta model joint training Layers definitions
+def meta_model_generator(k,model_enc,model_dec,round,epsilon_t):
   inputs_meta = keras.Input(shape=k, name='input_meta')
 
   encoded_bits = model_enc(inputs=inputs_meta)
@@ -62,28 +58,28 @@ def meta_model_generator(k,channel,model_enc,model_dec,round,epsilon_t):
   noisy_bits_3 = Lambda(utils_ML.BAC_noise_int_interval_irregular, arguments={'epsilon0': epsilon_test[2], 'batch_size': batch_size}, name='noise_layer_3')(x)
   noisy_bits_4 = Lambda(utils_ML.BAC_noise_int_interval_irregular, arguments={'epsilon0': epsilon_test[3], 'batch_size': batch_size}, name='noise_layer_4')(x)
   noisy_bits_5 = Lambda(utils_ML.BAC_noise_int_interval_irregular, arguments={'epsilon0': epsilon_test[4], 'batch_size': batch_size}, name='noise_layer_5')(x)
+
   decoded_bits = model_dec(inputs=noisy_bits)
   decoded_bits_1 = model_dec(inputs=noisy_bits_1)
   decoded_bits_2 = model_dec(inputs=noisy_bits_2)
   decoded_bits_3 = model_dec(inputs=noisy_bits_3)
   decoded_bits_4 = model_dec(inputs=noisy_bits_4)
   decoded_bits_5 = model_dec(inputs=noisy_bits_5)
-
+  ### Model Build
   meta_model = keras.Model(inputs=inputs_meta, outputs=[decoded_bits,decoded_bits_1,decoded_bits_2,decoded_bits_3,decoded_bits_4,decoded_bits_5],name = 'meta_model')
   return meta_model
 
-### Meta model Layers definitions
-def meta_dec_model_generator(channel,model_dec,epsilon_t):
-
+### Meta model for decoder's training Layers definitions
+def meta_dec_model_generator(model_dec,epsilon_t):
   x = keras.Input(shape=N)
 
-  if channel == 'BAC':
-    noisy_bits = Lambda(utils_ML.BAC_noise_int_interval_irregular, arguments={'epsilon0':epsilon_t,'batch_size':batch_size}, name='noise_layer')(x)
-    noisy_bits_1 = Lambda(utils_ML.BAC_noise_int_interval_irregular, arguments={'epsilon0': epsilon_test[0], 'batch_size': batch_size}, name='noise_layer_1')(x)
-    noisy_bits_2 = Lambda(utils_ML.BAC_noise_int_interval_irregular, arguments={'epsilon0': epsilon_test[1], 'batch_size': batch_size}, name='noise_layer_2')(x)
-    noisy_bits_3 = Lambda(utils_ML.BAC_noise_int_interval_irregular, arguments={'epsilon0': epsilon_test[2], 'batch_size': batch_size}, name='noise_layer_3')(x)
-    noisy_bits_4 = Lambda(utils_ML.BAC_noise_int_interval_irregular, arguments={'epsilon0': epsilon_test[3], 'batch_size': batch_size}, name='noise_layer_4')(x)
-    noisy_bits_5 = Lambda(utils_ML.BAC_noise_int_interval_irregular, arguments={'epsilon0': epsilon_test[4], 'batch_size': batch_size}, name='noise_layer_5')(x)
+  noisy_bits = Lambda(utils_ML.BAC_noise_int_interval_irregular, arguments={'epsilon0':epsilon_t,'batch_size':batch_size}, name='noise_layer')(x)
+  noisy_bits_1 = Lambda(utils_ML.BAC_noise_int_interval_irregular_test, arguments={'epsilon0': epsilon_test[0], 'epsilon_training': epsilon_t}, name='noise_layer_1')(x)
+  noisy_bits_2 = Lambda(utils_ML.BAC_noise_int_interval_irregular_test, arguments={'epsilon0': epsilon_test[1], 'epsilon_training': epsilon_t}, name='noise_layer_2')(x)
+  noisy_bits_3 = Lambda(utils_ML.BAC_noise_int_interval_irregular_test, arguments={'epsilon0': epsilon_test[2], 'epsilon_training': epsilon_t}, name='noise_layer_3')(x)
+  noisy_bits_4 = Lambda(utils_ML.BAC_noise_int_interval_irregular_test, arguments={'epsilon0': epsilon_test[3], 'epsilon_training': epsilon_t}, name='noise_layer_4')(x)
+  noisy_bits_5 = Lambda(utils_ML.BAC_noise_int_interval_irregular_test, arguments={'epsilon0': epsilon_test[4], 'epsilon_training': epsilon_t}, name='noise_layer_5')(x)
+
   decoded_bits = model_dec(inputs=noisy_bits)
   decoded_bits_1 = model_dec(inputs=noisy_bits_1)
   decoded_bits_2 = model_dec(inputs=noisy_bits_2)
@@ -94,102 +90,99 @@ def meta_dec_model_generator(channel,model_dec,epsilon_t):
   meta_model = keras.Model(inputs=x, outputs=[decoded_bits,decoded_bits_1,decoded_bits_2,decoded_bits_3,decoded_bits_4,decoded_bits_5],name = 'meta_model')
   return meta_model
 
+# Command line Parameters
+N = int(sys.argv[1])
+k = int(sys.argv[2])
+nb_pkts = int(sys.argv[3])
+length_training = sys.argv[4]
 
-#inputs
-channel = sys.argv[1]
-N = int(sys.argv[2])
-k = int(sys.argv[3])
-# iterations = int(sys.argv[4])
-
-nb_pkts = int(sys.argv[6])
-small_sim = sys.argv[7]
-
-S = 5
-
-if small_sim == 'medium':
-  rep = 512
+# Select training and test length
+if length_training == 'medium':
+  rep = 256
   epoch_pretrain = 600
   epoch_encoder = 300
-  epoch_decoder = 600
-  e0 = np.concatenate((np.linspace(0.001, 0.01, 5, endpoint=False), np.linspace(0.01, 0.05, 5, endpoint=False),  np.linspace(0.05, 0.1, 5, endpoint=False), np.linspace(0.1, 1, 10)), axis=0)
+  epoch_decoder = 1000
+  e0 = np.concatenate((np.array([0.001]), np.linspace(0.01, 0.1, 10, endpoint=False), np.linspace(0.1, 1, 15)), axis=0)
   verbose = 2
-  nb_pkts = 3000 if int(sys.argv[6]) < 3000 else int(sys.argv[6])
-elif small_sim == 'bug':
+  nb_pkts = 3000 if nb_pkts < 3000 else nb_pkts
+elif length_training == 'bug':
   rep = 256//2**k
   epoch_pretrain = 2
   epoch_encoder = 2
   epoch_decoder = 2
-  e0 = np.concatenate((np.array([0.001]), np.linspace(0.1, 1, 10)),axis=0)
   e0 = np.concatenate((np.array([0.001]), np.linspace(0.01, 0.1, 10, endpoint=False), np.linspace(0.1, 1, 15)), axis=0)
   verbose = 2
   nb_pkts = 10
-elif small_sim == 'long':
-  rep = 512
+elif length_training == 'long':
+  rep = 256
   epoch_pretrain = 1000
   epoch_encoder = 300
   epoch_decoder = 1000
-  e0 = np.concatenate((np.linspace(0.001, 0.01, 5, endpoint=False), np.linspace(0.01, 0.05, 5, endpoint=False),  np.linspace(0.05, 0.1, 5, endpoint=False), np.linspace(0.1, 1, 10)), axis=0)
+  e0 = np.concatenate((np.array([0.001]), np.linspace(0.01, 0.1, 10, endpoint=False), np.linspace(0.1, 1, 15)), axis=0)
   verbose = 2
-  nb_pkts = 10000 if int(sys.argv[6]) < 10000 else int(sys.argv[6])
+  nb_pkts = 10000 if nb_pkts < 10000 else nb_pkts
 else:
-  rep = 512
-  epoch_pretrain = 8000
+  rep = 128
+  epoch_pretrain = 100
   epoch_encoder = 100
-  epoch_decoder = 600
-  e0 = np.concatenate((np.linspace(0.001, 0.01, 5, endpoint=False), np.linspace(0.01, 0.05, 5, endpoint=False),  np.linspace(0.05, 0.1, 5, endpoint=False), np.linspace(0.1, 1, 10)), axis=0)
+  epoch_decoder = 300
+  e0 = np.concatenate((np.array([0.001]), np.linspace(0.1, 1, 10)), axis=0)
   verbose = 2
-  nb_pkts = 3000 if int(sys.argv[6]) < 3000 else int(sys.argv[6])
+  nb_pkts = 1000 if nb_pkts > 1000 else nb_pkts
 
 e0[len(e0) - 1] = e0[len(e0) - 1] - 0.001
 e1 = [t for t in e0 if t <= 0.5]
 
 #Parameters
-batch_size = 256
-MAP_test = True
+S = 4
+# epsilon_test = [0.001,0.01,0.1,0.3,0.55]
+epsilon_test = [0.005,0.025,0.075,0.125,0.5]
+loss_weights = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+MAP_test = True # Flag that allows (or not) the BER over MAP and the NN encoder
+pretraining = True
+encoder_fine_tuning = False
+decoder_fine_tuning = True
+train_epsilon_1 = 0.001       #useless for the BSC and epsilon_1 for the BAC
+pretrain_epsilon = 0.1
+encoder_epsilon = 0.1
+decoder_epsilon = 0.1
 
+#Training Data set
 u_k = utils.symbols_generator(k)
 U_k = np.tile(u_k,(rep,1))
-In = np.eye(2**k) # List of outputs of NN
-In = np.tile(In,(rep,1))
+One_hot = np.eye(2 ** k) # List of outputs of NN
+One_hot = np.tile(One_hot, (rep, 1))
 
-# [0,0.01],[0.01,0.05],[0.05,0.1],[0.1,1]
-epsilon_test = [0.005,0.025,0.075,0.125,0.5]
-# train_epsilon_1 = 0.001       #useless for the BSC and epsilon_1 for the BAC
-pretrain_epsilon = 0.02
-encoder_epsilon = 0.03
-decoder_epsilon = 0.2
-pretraining = True
-loss_weights = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+#Hyper parameters
+batch_size = 256
+initializer = tf.keras.initializers.Orthogonal()
+loss = 'categorical_crossentropy'  #'kl_divergence'
+activation = 'Mish'
 
 lr = 0.001
 decay = 0.999
-# reducing the learning rate by half every 2 epochs
-cbks = [LearningRateScheduler(lambda epoch: lr * decay ** (epoch // 1))]
-#Hyper parameters
-initializer = tf.keras.initializers.Orthogonal()
-optimizer = keras.optimizers.Adam(lr=lr)
+# reducing the learning rate every epoch
+cbks = [LearningRateScheduler(lambda epoch: lr * decay ** epoch)]
+optimizer = keras.optimizers.Nadam(lr=lr)
 lr_metric = utils_ML.get_lr_metric(optimizer)
-loss = 'categorical_crossentropy' #'categorical_crossentropy'  #'kl_divergence'          # 'mse'
-activation = 'Mish'
 
-BER = test.read_ber_file(N, k, 'BER')
-BER = test.saved_results(BER, N, k)
-BLER = test.read_ber_file(N, k, 'BLER')
-# BLER = test.saved_results(BLER, N, k, 'BLER')
+# Saved results recovery for plot them later
+BER = utils.read_ber_file(N, k, 'BER')
+BER = utils.saved_results(BER, N, k)
+BLER = utils.read_ber_file(N, k, 'BLER')
+BLER = utils.saved_results(BLER, N, k, 'BLER')
 
 
 # # pretraining
 if pretraining:
-  print("----------------------------------Pretraining------------------------------------------")
+  print("----------------------------------Joint Pretraining------------------------------------------")
   model_encoder = encoder_generator(N,k)
   model_decoder = decoder_generator(N,k)
-  meta_model = meta_model_generator(k,channel,model_encoder,model_decoder, False, pretrain_epsilon)
+  meta_model = meta_model_generator(k,model_encoder,model_decoder, True, pretrain_epsilon)
   ### Compile our models
-  model_encoder.compile()
-  model_decoder.compile()
-  meta_model.compile(loss=loss, optimizer=optimizer,loss_weights=loss_weights, metrics=lr_metric)
+  meta_model.compile(loss=loss, optimizer=optimizer,loss_weights=loss_weights)
   ### Fit the model
-  history = meta_model.fit(U_k, [In,In,In,In,In,In], epochs=epoch_pretrain, verbose=verbose, shuffle=False, batch_size=batch_size, callbacks=cbks)
+  history = meta_model.fit(U_k, [One_hot,One_hot,One_hot,One_hot,One_hot,One_hot], epochs=epoch_pretrain, verbose=verbose, shuffle=False, batch_size=batch_size)
 
   loss_values = history.history['decoder_model_loss']
   loss_values_1 = history.history['decoder_model_1_loss']
@@ -198,90 +191,78 @@ if pretraining:
   loss_values_4 = history.history['decoder_model_4_loss']
   loss_values_5 = history.history['decoder_model_5_loss']
 
-  # if len(sys.argv) > 5:
-  #   if sys.argv[5] == 'BER':
-  #     C = np.round(model_encoder.predict(u_k)).astype('int')
-  #     print('codebook C is Linear? ', utils.isLinear(C))
-  #     BER[f"auto-array-one-int_pretrain"], BLER[f"auto-array-one-int_pretrain"] = utils_ML.bit_error_rate_NN_interval_dec(N, k, C, nb_pkts, e0, e1,model_decoder,'one',train_epsilon)
+  # C = np.round(model_encoder.predict(u_k)).astype('int')
+  # print('codebook C is Linear? ', utils.isLinear(C))
+  # BER[f"auto-array-one-int_pretrain"], BLER[f"auto-array-one-int_pretrain"] = utils_ML.bit_error_rate_NN_interval_dec(N, k, C, nb_pkts, e0, e1,model_decoder,'one',train_epsilon)
 
 # Fine tuning
-# lr = lr * decay ** (epoch_pretrain // 1)
-#
-# print("---------------------------------- Encoder Fine Tuning------------------------------------------")
-# model_decoder.trainable = True #train encoder
-# model_encoder.trainable = True
-# epoch_int = epoch_encoder
-# train_epsilon_1 = encoder_epsilon ####### Revisar
-# train_epsilon = encoder_epsilon
-# rounding = True
-# ### Compile our models
-# meta_model = meta_model_generator(k, channel, model_encoder, model_decoder, rounding, train_epsilon)
-#
-# model_encoder.compile()
-# model_decoder.compile()
-# meta_model.compile(loss=loss, optimizer=optimizer, loss_weights=loss_weights)
-#
-# ### Fit the model
-# history = meta_model.fit(U_k, [In, In, In, In, In, In], epochs=epoch_int, verbose=verbose, shuffle=False, batch_size=batch_size)
-#
-# loss_values += history.history['decoder_model_loss']
-# loss_values_1 += history.history['decoder_model_1_loss']
-# loss_values_2 += history.history['decoder_model_2_loss']
-# loss_values_3 += history.history['decoder_model_3_loss']
-# loss_values_4 += history.history['decoder_model_4_loss']
-# loss_values_5 += history.history['decoder_model_5_loss']
-# # lr = lr * decay ** (epoch_int // 1)
+lr = lr * decay **epoch_pretrain
 
-print("---------------------------------- Decoder Fine Tuning------------------------------------------")
+if encoder_fine_tuning:
 
-# model_decoder.trainable = True #train decoder
-lr = 0.001
-model_decoder = decoder_generator(N,k)
+  print("---------------------------------- Encoder Fine Tuning------------------------------------------")
+  model_decoder.trainable = False  # train encoder
+  model_encoder.trainable = True
+  rounding = True
 
-epoch_int = epoch_decoder
-train_epsilon = decoder_epsilon
+  meta_model = meta_model_generator(k, model_encoder, model_decoder, rounding, encoder_epsilon)
+  ### Compile our models
+  meta_model.compile(loss=loss, optimizer=optimizer, loss_weights=loss_weights)
 
-### Compile our models
-meta_dec_model = meta_dec_model_generator(channel,model_decoder,train_epsilon)
+  ### Fit the model
+  history = meta_model.fit(U_k, [One_hot, One_hot, One_hot, One_hot, One_hot, One_hot], epochs=epoch_encoder,verbose=verbose, shuffle=False, batch_size=batch_size)
 
-model_decoder.compile(loss=loss, optimizer=optimizer, metrics=lr_metric)
-meta_dec_model.compile(loss=loss, optimizer=optimizer, loss_weights=loss_weights)
+  loss_values += history.history['decoder_model_loss']
+  loss_values_1 += history.history['decoder_model_1_loss']
+  loss_values_2 += history.history['decoder_model_2_loss']
+  loss_values_3 += history.history['decoder_model_3_loss']
+  loss_values_4 += history.history['decoder_model_4_loss']
+  loss_values_5 += history.history['decoder_model_5_loss']
 
-c_n = np.round(model_encoder.predict(u_k)).astype('int')
-C_n = np.array(c_n)
-C_n = np.tile(C_n,(rep,1))
-### Fit the model
-history = meta_dec_model.fit(C_n, [In, In, In, In, In, In], epochs=epoch_int, verbose=verbose, shuffle=False, batch_size=batch_size)
 
-loss_values += history.history['decoder_model_loss']
-loss_values_1 += history.history['decoder_model_1_loss']
-loss_values_2 += history.history['decoder_model_2_loss']
-loss_values_3 += history.history['decoder_model_3_loss']
-loss_values_4 += history.history['decoder_model_4_loss']
-loss_values_5 += history.history['decoder_model_5_loss']
+if decoder_fine_tuning:
+  print("---------------------------------- Decoder Fine Tuning------------------------------------------")
 
-if len(sys.argv) > 5:
-  if sys.argv[5] == 'BER':
-    C = np.round(model_encoder.predict(u_k)).astype('int')
-    print('codebook C is Linear? ', utils.isLinear(C))
-    BER[f"auto-array-one-dec"], BLER[f"auto-array-one_dec"] = utils_ML.bit_error_rate_NN_decoder_irregular(N, k, C, nb_pkts, e0, e1,model_decoder, 'one', train_epsilon)
+  model_decoder.trainable = True #train decoder
+  model_encoder.trainable = False
+  optimizer = 'adam'
+
+  meta_dec_model = meta_dec_model_generator(model_decoder,decoder_epsilon)
+  ### Compile our models
+  meta_dec_model.compile(loss=loss, optimizer=optimizer, loss_weights=loss_weights)
+
+  # Data training set
+  c_n = np.round(model_encoder.predict(u_k)).astype('int')
+  C_n = np.tile(c_n,(rep,1))
+  ### Fit the model
+  history = meta_dec_model.fit(C_n, [One_hot, One_hot, One_hot, One_hot, One_hot, One_hot], epochs=epoch_decoder, verbose=verbose, shuffle=False, batch_size=batch_size)
+
+  loss_values += history.history['decoder_model_loss']
+  loss_values_1 += history.history['decoder_model_1_loss']
+  loss_values_2 += history.history['decoder_model_2_loss']
+  loss_values_3 += history.history['decoder_model_3_loss']
+  loss_values_4 += history.history['decoder_model_4_loss']
+  loss_values_5 += history.history['decoder_model_5_loss']
+
+  C = np.round(model_encoder.predict(u_k)).astype('int')
+  print('codebook C is Linear? ', utils.isLinear(C))
+  BER[f"auto-array-one-dec"], BLER[f"auto-array-one_dec"] = utils_ML.bit_error_rate_NN_decoder(N, k, C, nb_pkts, e0, e1,model_decoder, 'one', decoder_epsilon)
 
 if MAP_test:
   BER['NN-MAP'] = utils.bit_error_rate(k, C, nb_pkts//2, e0, e1, coded = True)
 
-print("The model is ready to be used...")
-
-##########################################################################################################################
-
-
-
+#######################Plotting ###################################################################################
+# Plot the loss function values for the different epsilon, they were calculated during training
+fig = plt.figure(figsize=(20,10))
+title = f'N={N} k={k} {length_training} - NN Array_Onehot fine decoder int-interval-irregular'
 plt.semilogy(loss_values  , alpha=0.8 , color='brown',linewidth=0.15)
 plt.semilogy(loss_values_1, alpha=0.8, color='blue',linewidth=0.15)
 plt.semilogy(loss_values_2, alpha=0.8, color='orange',linewidth=0.15)
 plt.semilogy(loss_values_3, alpha=0.8, color='green',linewidth=0.15)
 plt.semilogy(loss_values_4, alpha=0.8, color='red',linewidth=0.15)
 
-filter_size = 30
+# Plot the loss function values passed through a filter, it allows to conclude more easily
+filter_size = 100
 plt.semilogy(utils_ML.smooth(loss_values,filter_size)[filter_size-1:], color='brown', label=f"BER ($\epsilon_0$ = {decoder_epsilon})*")
 plt.semilogy(utils_ML.smooth(loss_values_1,filter_size)[filter_size-1:], color='blue', label=f"BER ($\epsilon_0$ = {epsilon_test[0]})")
 plt.semilogy(utils_ML.smooth(loss_values_2,filter_size)[filter_size-1:], color='orange', label=f"BER ($\epsilon_0$ = {epsilon_test[1]})")
@@ -289,30 +270,18 @@ plt.semilogy(utils_ML.smooth(loss_values_3,filter_size)[filter_size-1:], color='
 plt.semilogy(utils_ML.smooth(loss_values_4,filter_size)[filter_size-1:], color='red', label=f"BER ($\epsilon_0$ = {epsilon_test[3]})")
 plt.semilogy(utils_ML.smooth(loss_values_5,filter_size)[filter_size-1:], color='purple', label=f"BER ($\epsilon_0$ = {epsilon_test[4]})")
 
-# dict_training = {}
-# dict_training[epsilon_test[0]] = [utils_ML.smooth(loss_values_1,filter_size)[-1]]
-# dict_training[epsilon_test[1]] = [utils_ML.smooth(loss_values_2,filter_size)[-1]]
-# dict_training[pretrain_epsilon] = [utils_ML.smooth(loss_values,filter_size)[-1]]
-# dict_training[epsilon_test[2]] = [utils_ML.smooth(loss_values_3,filter_size)[-1]]
-# dict_training[epsilon_test[3]] = [utils_ML.smooth(loss_values_4,filter_size)[-1]]
-# dict_training[epsilon_test[4]] = [utils_ML.smooth(loss_values_5,filter_size)[-1]]
-# BER['Training'] = dict_training
-
-# plt.semilogy(loss_values, label='Loss')
-plt.title(f'Array-Onehot-Interval-irregular - Training results vs No. epoch - {nb_pkts} pkts')
+plt.title(f'{title} - Training results vs No. epoch - {nb_pkts} pkts')
 plt.ylabel('Loss value')
 plt.xlabel('No. epoch')
 plt.legend(loc="best")
 plt.grid()
-
+fig.savefig(f"./figures/LOSS {title}")
 #####################################################
-## TEST
-if len(sys.argv) > 5:
-  utils.plot_BAC(f'BER N={N} k={k} - ARRAY-ONEHOT-Interval-irregular - {nb_pkts} pkts', BER, k / N)
-  # utils.plot_BAC(f'BLER N={N} k={k} - ARRAY-ONEHOT', BLER, k / N)
-for c in C:
-  print(c)
-plt.show()
+# BER and BLER plotting
+utils.plot_BAC(f'BER {title}', BER, k / N)
+utils.plot_BAC(f'BLER {title}', BLER, k / N)
 
+print(title)
+# plt.show()
 
-# \Python3\python.exe autoencoder_array-onehot_fine-decoder_int-interval-irregular.py BAC 4 2 2 BER 1000 medium
+# \Python3\python.exe autoencoder_array-onehot_fine-decoder_int-interval-irregular.py 8 4 1000 medium
